@@ -1,5 +1,5 @@
 {
-  "name": "@kyungyeol.baek/codex-replay",
+  "name": "codex-replay",
   "version": "0.1.2",
   "description": "Turn Codex JSONL sessions into self-contained HTML replays.",
   "type": "module",
@@ -37,9 +37,6 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/zpdldhkdl/codex-replay"
-  },
-  "publishConfig": {
-    "access": "public"
   },
   "license": "MIT",
   "dependencies": {
