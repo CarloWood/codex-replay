@@ -23,6 +23,8 @@ Install with npm:
 npm install -g codex-replay
 ```
 
+Requires Node.js 20 or later.
+
 Then run it from your terminal:
 
 ```bash

@@ -10,6 +10,7 @@ const MIN_COLUMNS = 48;
 const ENTRY_ROWS = 3;
 const HEADER_ROWS = 4;
 const DETAIL_ROWS = 8;
+const ANSI_ESCAPE_REGEX = new RegExp("\\u001B\\[[0-9;]*m", "g");
 
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
@@ -323,7 +324,7 @@ function parseInteractiveKeys(chunk) {
 }
 
 function stripAnsi(value) {
-  return String(value ?? "").replace(/\u001b\[[0-9;]*m/g, "");
+  return String(value ?? "").replace(ANSI_ESCAPE_REGEX, "");
 }
 
 async function pickWithFallback(candidates, { input, output, limit = DEFAULT_LIMIT } = {}) {
@@ -459,7 +460,7 @@ export function applyInteractivePickerKey(
   candidates,
   state,
   key,
-  { rows = DEFAULT_ROWS, columns = DEFAULT_COLUMNS } = {}
+  { rows = DEFAULT_ROWS } = {}
 ) {
   const normalizedState = normalizeInteractiveState(candidates, state);
   const filtered = filterCandidates(candidates, normalizedState.query);
