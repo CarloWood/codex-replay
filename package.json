@@ -1,6 +1,6 @@
 {
   "name": "@kyungyeol.baek/codex-replay",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Turn Codex JSONL sessions into self-contained HTML replays.",
   "type": "module",
   "bin": {
