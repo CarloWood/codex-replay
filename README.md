@@ -20,7 +20,7 @@ Generated demo replay screenshot. Regenerate it with `npm run docs:demo`.
 Install with npm:
 
 ```bash
-npm install -g codex-replay
+npm install -g @zpdldhkdl/codex-replay
 ```
 
 Requires Node.js 20 or later.
@@ -34,7 +34,7 @@ codex-replay
 Or run it once without installing:
 
 ```bash
-npx codex-replay ~/.codex/sessions/2026/03/07/rollout-*.jsonl -o replay.html
+npx @zpdldhkdl/codex-replay ~/.codex/sessions/2026/03/07/rollout-*.jsonl -o replay.html
 ```
 
 If you run `codex-replay` in a TTY without an input path, it opens an interactive session picker that scans your local Codex JSONL files, merges history plus rollout trees by `session_id`, and shows one row per session.
