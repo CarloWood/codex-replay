@@ -10,7 +10,7 @@ const MIN_COLUMNS = 48;
 const ENTRY_ROWS = 3;
 const HEADER_ROWS = 4;
 const DETAIL_ROWS = 8;
-const ANSI_ESCAPE_REGEX = new RegExp("\\u001B\\[[0-9;]*m", "g");
+const ANSI_ESCAPE_REGEX = new RegExp("\\u{1B}\\[[0-9;]*m", "gu");
 
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
