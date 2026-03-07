@@ -1,0 +1,47 @@
+{
+  "name": "codex-replay",
+  "version": "0.1.0",
+  "description": "Turn Codex JSONL sessions into self-contained HTML replays.",
+  "type": "module",
+  "bin": {
+    "codex-replay": "bin/codex-replay.mjs"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "template/"
+  ],
+  "scripts": {
+    "build": "node scripts/build-template.mjs",
+    "docs:demo": "node scripts/generate-demo.mjs",
+    "test": "node --test test/test-*.mjs",
+    "test:e2e": "npx playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "esbuild": "^0.25.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "codex",
+    "replay",
+    "jsonl",
+    "cli",
+    "html",
+    "session",
+    "terminal",
+    "openai"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zpdldhkdl/codex-replay"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "picocolors": "^1.1.1",
+    "string-width": "^8.2.0",
+    "wrap-ansi": "^10.0.0"
+  }
+}

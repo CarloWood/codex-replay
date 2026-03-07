@@ -1,0 +1,14 @@
+node_modules/
+*.tgz
+template/player.min.html
+.DS_Store
+test-results/
+a.html
+a.fixed.html
+release-notes.md
+playwright-report/
+.env
+.env.local
+.env.*.local
+!.env.example
+.npmrc
