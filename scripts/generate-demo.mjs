@@ -1,10 +1,11 @@
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { chromium } from "playwright";
+import { chromium, firefox, webkit } from "playwright";
 import { parseTranscript } from "../src/parser.mjs";
 import { render } from "../src/renderer.mjs";
 import { getTheme } from "../src/themes.mjs";
+import { getPlaywrightBrowserConfig } from "./playwright-browser.mjs";
 
 const ROOT_DIR = resolve(new URL("..", import.meta.url).pathname);
 const DOCS_DIR = join(ROOT_DIR, "docs");
@@ -168,7 +169,9 @@ function buildDemoJsonl() {
 }
 
 async function captureScreenshot(htmlPath) {
-  const browser = await chromium.launch({ headless: true });
+  const { browserName, launchOptions } = getPlaywrightBrowserConfig();
+  const browserType = browserName === "firefox" ? firefox : browserName === "webkit" ? webkit : chromium;
+  const browser = await browserType.launch({ headless: true, ...launchOptions });
   const page = await browser.newPage({ viewport: { width: 1480, height: 1280 }, deviceScaleFactor: 1.5 });
 
   try {

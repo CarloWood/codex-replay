@@ -186,6 +186,10 @@ npm test
 npm run test:e2e
 ```
 
+If you want to run Playwright against a system-installed browser (common on Arch), set `PLAYWRIGHT_BROWSER_EXECUTABLE_PATH` (optionally also `PLAYWRIGHT_BROWSER_NAME=chromium|firefox|webkit`). Note that Playwright’s `firefox` engine typically expects Playwright’s bundled/patched Firefox; many distro `firefox` binaries will not work with `@playwright/test`. If you want to use Playwright-managed browsers instead, do not set `PLAYWRIGHT_BROWSER_EXECUTABLE_PATH`; run `npx playwright install <browser>` and set only `PLAYWRIGHT_BROWSER_NAME`.
+
+To avoid Playwright-managed browser downloads during dependency install, set `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` before `npm install`.
+
 `npm run build` regenerates `template/player.min.html` from `template/player.html`.
 `npm run docs:demo` regenerates [`docs/demo.html`](./docs/demo.html) and captures a fresh headless screenshot at [`docs/screenshot-demo.png`](./docs/screenshot-demo.png).
 
