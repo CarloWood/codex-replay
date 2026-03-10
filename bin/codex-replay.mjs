@@ -29,6 +29,8 @@ const options = {
   "no-system": { type: "boolean", default: false },
   "no-thinking": { type: "boolean", default: false },
   "no-tool-calls": { type: "boolean", default: false },
+  context: { type: "boolean", default: false },
+  raw: { type: "boolean", default: false },
   theme: { type: "string", default: "cinder-amber" },
   "theme-file": { type: "string" },
   "list-themes": { type: "boolean", default: false },
@@ -70,6 +72,8 @@ Options:
   --no-reasoning          Hide reasoning blocks by default
   --no-tools              Hide tool blocks by default
   --no-system             Hide system notice blocks by default
+  --context               Show context blocks by default
+  --raw                   Show raw JSONL blocks by default
   --title TEXT            Page title override
   --no-redact             Disable secret redaction in output
   --theme NAME            Built-in theme (default: cinder-amber)
@@ -361,6 +365,8 @@ const html = render(document, {
   showReasoning,
   showTools,
   showSystem: !values["no-system"],
+  showContext: Boolean(values.context),
+  showRaw: Boolean(values.raw),
   theme,
   redactSecrets: !values["no-redact"],
   userLabel: values["user-label"],

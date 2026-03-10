@@ -9,6 +9,7 @@ import { readFileSync } from "node:fs";
  *   format: "rollout" | "history",
  *   meta: Record<string, unknown>,
  *   turns: ReplayTurn[],
+ *   bootstrap?: { blocks: ReplayBlock[] } | null,
  *   sessions?: HistorySession[],
  * }} ReplayDocument
  *
@@ -42,6 +43,7 @@ import { readFileSync } from "node:fs";
  *   answers?: unknown,
  *   meta?: Record<string, unknown> | null,
  *   status?: string | null,
+ *   role?: string | null,
  * }} ReplayBlock
  *
  * @typedef {{
@@ -65,7 +67,11 @@ function readJsonLines(filePath) {
     const trimmed = line.trim();
     if (!trimmed) continue;
     try {
-      entries.push(JSON.parse(trimmed));
+      const parsed = JSON.parse(trimmed);
+      if (parsed && typeof parsed === "object") {
+        parsed._raw = trimmed;
+      }
+      entries.push(parsed);
     } catch {
       // Ignore malformed lines so partially written logs still parse.
     }
@@ -133,6 +139,17 @@ function extractAssistantMessageText(content) {
   const parts = [];
   for (const item of content) {
     if (item?.type === "output_text" || item?.type === "text") {
+      parts.push(item.text ?? "");
+    }
+  }
+  return cleanText(parts.join("\n\n"));
+}
+
+function extractInputMessageText(content) {
+  if (!Array.isArray(content)) return "";
+  const parts = [];
+  for (const item of content) {
+    if (item?.type === "input_text" || item?.type === "text") {
       parts.push(item.text ?? "");
     }
   }
@@ -207,6 +224,7 @@ function blockSignature(block) {
     block.kind,
     block.phase ?? "",
     block.name ?? "",
+    block.role ?? "",
     block.call_id ?? "",
     block.text ?? "",
     block.summary_text ?? "",
@@ -238,11 +256,19 @@ function createTurn(meta, timestamp, turnId) {
       local_images: [],
     },
     blocks: [],
+    raw_lines: [],
     status: "in_progress",
     timestamp: timestamp ?? null,
     _seen: new Set(),
     _pending: new Map(),
   };
+}
+
+function pushRawLine(turn, entry) {
+  if (!turn) return;
+  const rawLine = typeof entry?._raw === "string" ? entry._raw : JSON.stringify(entry);
+  if (typeof rawLine !== "string" || !rawLine) return;
+  turn.raw_lines.push(rawLine);
 }
 
 function ensureTurn(state, timestamp) {
@@ -374,6 +400,14 @@ function finalizeTurn(state) {
     state.currentTurn = null;
     return;
   }
+  if (Array.isArray(turn.raw_lines) && turn.raw_lines.length) {
+    pushBlock(turn, {
+      kind: "raw_jsonl",
+      name: "raw_jsonl",
+      text: turn.raw_lines.join("\n"),
+      timestamp: turn.timestamp ?? null,
+    });
+  }
   const normalized = normalizeTurnForOutput(turn, state.turns.length + 1);
   state.turns.push(normalized);
   state.currentTurn = null;
@@ -401,22 +435,38 @@ function parseRolloutEntries(entries, opts = {}) {
       cli_version: null,
       model_provider: null,
       started_at: null,
+      base_instructions: null,
       parent_thread_id: null,
       agent_nickname: null,
       agent_role: null,
       source_path: opts.sourcePath ?? null,
     },
     turns: [],
+    bootstrapTurn: null,
     currentTurn: null,
     lastTurnId: null,
     seenTurnStart: false,
   };
 
+  state.bootstrapTurn = createTurn(state.meta, null, null);
+  state.bootstrapTurn.status = "history";
+
   for (const entry of entries) {
     const timestamp = typeof entry.timestamp === "string" ? entry.timestamp : null;
+    let rawRecorded = false;
+    const recordRaw = (turn) => {
+      if (rawRecorded) return;
+      pushRawLine(turn, entry);
+      rawRecorded = true;
+    };
+    const getContextTurn = () => {
+      if (state.seenTurnStart || state.currentTurn) return ensureTurn(state, timestamp);
+      return state.bootstrapTurn;
+    };
 
     if (entry.type === "session_meta") {
       const payload = entry.payload ?? {};
+      recordRaw(state.bootstrapTurn);
       state.meta = {
         source: payload.source ?? "rollout",
         session_id: payload.id ?? null,
@@ -424,20 +474,45 @@ function parseRolloutEntries(entries, opts = {}) {
         cli_version: payload.cli_version ?? null,
         model_provider: payload.model_provider ?? null,
         started_at: payload.timestamp ?? timestamp ?? null,
+        base_instructions: payload.base_instructions ?? null,
         parent_thread_id: payload.source?.subagent?.thread_spawn?.parent_thread_id ?? null,
         agent_nickname: payload.agent_nickname ?? null,
         agent_role: payload.agent_role ?? null,
         source_path: opts.sourcePath ?? null,
       };
+      state.bootstrapTurn.session_id = state.meta.session_id ?? null;
+      pushBlock(state.bootstrapTurn, {
+        kind: "context_meta",
+        name: "session_meta",
+        input: payload,
+        timestamp,
+      });
+      const baseText = cleanText(payload?.base_instructions?.text ?? "");
+      if (baseText) {
+        pushBlock(state.bootstrapTurn, {
+          kind: "context_message",
+          name: "base_instructions",
+          role: "system",
+          text: baseText,
+          timestamp,
+        });
+      }
       continue;
     }
 
     if (entry.type === "turn_context") {
       const payload = entry.payload ?? {};
+      recordRaw(getContextTurn());
       if (!state.meta.cwd && payload.cwd) state.meta.cwd = payload.cwd;
       if (!state.meta.model_provider && (payload.model_provider || payload.model)) {
         state.meta.model_provider = payload.model_provider ?? payload.model;
       }
+      pushBlock(getContextTurn(), {
+        kind: "context_meta",
+        name: "turn_context",
+        input: payload,
+        timestamp,
+      });
       continue;
     }
 
@@ -450,6 +525,7 @@ function parseRolloutEntries(entries, opts = {}) {
           }
           state.lastTurnId = payload.turn_id ?? null;
           state.currentTurn = createTurn(state.meta, timestamp, state.lastTurnId);
+          recordRaw(state.currentTurn);
           state.seenTurnStart = true;
           break;
         }
@@ -459,6 +535,7 @@ function parseRolloutEntries(entries, opts = {}) {
             finalizeTurn(state);
           }
           const turn = ensureTurn(state, timestamp);
+          recordRaw(turn);
           state.seenTurnStart = true;
           applyUserMessage(turn, payload, timestamp);
           break;
@@ -466,6 +543,7 @@ function parseRolloutEntries(entries, opts = {}) {
         case "agent_message": {
           if (!state.seenTurnStart && !state.currentTurn) break;
           const turn = ensureTurn(state, timestamp);
+          recordRaw(turn);
           if (cleanText(payload.message ?? "")) {
             pushAssistantMessageBlock(turn, {
               text: payload.message,
@@ -478,6 +556,7 @@ function parseRolloutEntries(entries, opts = {}) {
         case "agent_reasoning": {
           if (!state.seenTurnStart && !state.currentTurn) break;
           const turn = ensureTurn(state, timestamp);
+          recordRaw(turn);
           if (cleanText(payload.text ?? "")) {
             pushBlock(turn, {
               kind: "reasoning",
@@ -490,6 +569,7 @@ function parseRolloutEntries(entries, opts = {}) {
         case "request_user_input": {
           if (!state.seenTurnStart && !state.currentTurn) break;
           const turn = ensureTurn(state, timestamp);
+          recordRaw(turn);
           pushBlock(turn, {
             kind: "request_user_input",
             call_id: payload.call_id ?? null,
@@ -502,6 +582,7 @@ function parseRolloutEntries(entries, opts = {}) {
         case "plan_update": {
           if (!state.seenTurnStart && !state.currentTurn) break;
           const turn = ensureTurn(state, timestamp);
+          recordRaw(turn);
           pushBlock(turn, {
             kind: "system_notice",
             text: summarizePlanUpdate(payload),
@@ -513,6 +594,7 @@ function parseRolloutEntries(entries, opts = {}) {
         case "context_compacted": {
           if (!state.seenTurnStart && !state.currentTurn) break;
           const turn = ensureTurn(state, timestamp);
+          recordRaw(turn);
           pushBlock(turn, {
             kind: "system_notice",
             text: "Conversation compacted.",
@@ -524,6 +606,7 @@ function parseRolloutEntries(entries, opts = {}) {
         case "item_started": {
           if (!state.seenTurnStart && !state.currentTurn) break;
           const turn = ensureTurn(state, timestamp);
+          recordRaw(turn);
           pushBlock(turn, {
             kind: "system_notice",
             text: summarizeItemEvent(payload, "Item started"),
@@ -535,6 +618,7 @@ function parseRolloutEntries(entries, opts = {}) {
         case "item_completed": {
           if (!state.seenTurnStart && !state.currentTurn) break;
           const turn = ensureTurn(state, timestamp);
+          recordRaw(turn);
           pushBlock(turn, {
             kind: "system_notice",
             text: summarizeItemEvent(payload, "Item completed"),
@@ -546,6 +630,7 @@ function parseRolloutEntries(entries, opts = {}) {
         case "turn_aborted": {
           if (!state.seenTurnStart && !state.currentTurn) break;
           const turn = ensureTurn(state, timestamp);
+          recordRaw(turn);
           turn.status = "aborted";
           if (cleanText(payload.reason ?? "")) {
             pushBlock(turn, {
@@ -561,6 +646,7 @@ function parseRolloutEntries(entries, opts = {}) {
         case "task_complete": {
           if (!state.seenTurnStart && !state.currentTurn) break;
           const turn = ensureTurn(state, timestamp);
+          recordRaw(turn);
           if (cleanText(payload.last_agent_message ?? "")) {
             pushAssistantMessageBlock(turn, {
               text: payload.last_agent_message,
@@ -575,30 +661,61 @@ function parseRolloutEntries(entries, opts = {}) {
         default:
           break;
       }
+      if (!rawRecorded) {
+        recordRaw(getContextTurn());
+      }
       continue;
     }
 
-    if (entry.type !== "response_item") continue;
+    if (entry.type !== "response_item") {
+      recordRaw(state.currentTurn ?? state.bootstrapTurn);
+      continue;
+    }
 
     const payload = entry.payload ?? {};
 
-    if (payload.type === "message" && payload.role === "assistant") {
-      if (!state.seenTurnStart && !state.currentTurn) continue;
-      const turn = ensureTurn(state, timestamp);
-      const text = extractAssistantMessageText(payload.content);
-      if (text) {
-        pushAssistantMessageBlock(turn, {
-          text,
-          phase: payload.phase ?? null,
-          timestamp,
-        });
+    if (payload.type === "message") {
+      const role = typeof payload.role === "string" ? payload.role : null;
+      const turn = getContextTurn();
+      recordRaw(turn);
+      if (role === "assistant") {
+        const text = extractAssistantMessageText(payload.content);
+        if (text) {
+          if (turn === state.bootstrapTurn && !state.seenTurnStart && !state.currentTurn) {
+            pushBlock(turn, {
+              kind: "context_message",
+              name: "assistant_message",
+              role: "assistant",
+              phase: payload.phase ?? null,
+              text,
+              timestamp,
+            });
+          } else {
+            pushAssistantMessageBlock(turn, {
+              text,
+              phase: payload.phase ?? null,
+              timestamp,
+            });
+          }
+        }
+      } else {
+        const text = extractInputMessageText(payload.content);
+        if (text) {
+          pushBlock(turn, {
+            kind: "context_message",
+            name: "message",
+            role,
+            text,
+            timestamp,
+          });
+        }
       }
       continue;
     }
 
     if (payload.type === "reasoning") {
-      if (!state.seenTurnStart && !state.currentTurn) continue;
-      const turn = ensureTurn(state, timestamp);
+      const turn = getContextTurn();
+      recordRaw(turn);
       const visibleText = extractReasoningText(payload.content);
       if (visibleText) {
         pushBlock(turn, {
@@ -619,8 +736,8 @@ function parseRolloutEntries(entries, opts = {}) {
     }
 
     if (payload.type === "function_call") {
-      if (!state.seenTurnStart && !state.currentTurn) continue;
-      const turn = ensureTurn(state, timestamp);
+      const turn = getContextTurn();
+      recordRaw(turn);
       const parsedInput = parseToolInput(payload.arguments);
       if (payload.name === "request_user_input") {
         const questions = Array.isArray(parsedInput?.questions) ? parsedInput.questions : [];
@@ -645,15 +762,15 @@ function parseRolloutEntries(entries, opts = {}) {
     }
 
     if (payload.type === "function_call_output") {
-      if (!state.seenTurnStart && !state.currentTurn) continue;
-      const turn = ensureTurn(state, timestamp);
+      const turn = getContextTurn();
+      recordRaw(turn);
       finalizePendingCall(turn, payload.call_id, extractToolOutput(payload.output), timestamp);
       continue;
     }
 
     if (payload.type === "custom_tool_call") {
-      if (!state.seenTurnStart && !state.currentTurn) continue;
-      const turn = ensureTurn(state, timestamp);
+      const turn = getContextTurn();
+      recordRaw(turn);
       pushBlock(turn, {
         kind: "custom_tool",
         call_id: payload.call_id ?? null,
@@ -666,15 +783,15 @@ function parseRolloutEntries(entries, opts = {}) {
     }
 
     if (payload.type === "custom_tool_call_output") {
-      if (!state.seenTurnStart && !state.currentTurn) continue;
-      const turn = ensureTurn(state, timestamp);
+      const turn = getContextTurn();
+      recordRaw(turn);
       finalizePendingCall(turn, payload.call_id, extractToolOutput(payload.output), timestamp);
       continue;
     }
 
     if (payload.type === "web_search_call") {
-      if (!state.seenTurnStart && !state.currentTurn) continue;
-      const turn = ensureTurn(state, timestamp);
+      const turn = getContextTurn();
+      recordRaw(turn);
       pushBlock(turn, {
         kind: "web_search",
         name: "web_search",
@@ -688,8 +805,8 @@ function parseRolloutEntries(entries, opts = {}) {
     }
 
     if (payload.type === "local_shell_call") {
-      if (!state.seenTurnStart && !state.currentTurn) continue;
-      const turn = ensureTurn(state, timestamp);
+      const turn = getContextTurn();
+      recordRaw(turn);
       pushBlock(turn, {
         kind: "tool_call",
         call_id: payload.call_id ?? null,
@@ -702,8 +819,8 @@ function parseRolloutEntries(entries, opts = {}) {
     }
 
     if (payload.type === "ghost_snapshot") {
-      if (!state.seenTurnStart && !state.currentTurn) continue;
-      const turn = ensureTurn(state, timestamp);
+      const turn = getContextTurn();
+      recordRaw(turn);
       pushBlock(turn, {
         kind: "system_notice",
         text: "Ghost snapshot captured.",
@@ -717,15 +834,18 @@ function parseRolloutEntries(entries, opts = {}) {
     }
 
     if (payload.type === "compaction") {
-      if (!state.seenTurnStart && !state.currentTurn) continue;
-      const turn = ensureTurn(state, timestamp);
+      const turn = getContextTurn();
+      recordRaw(turn);
       pushBlock(turn, {
         kind: "system_notice",
         text: "Compaction payload omitted.",
         status: "compaction",
         timestamp,
       });
+      continue;
     }
+
+    recordRaw(getContextTurn());
   }
 
   if (state.currentTurn) {
@@ -733,9 +853,25 @@ function parseRolloutEntries(entries, opts = {}) {
     finalizeTurn(state);
   }
 
+  if (state.bootstrapTurn && (state.bootstrapTurn.blocks.length || state.bootstrapTurn.raw_lines.length)) {
+    const bootstrapTimestamp = state.meta.started_at ?? null;
+    if (!state.bootstrapTurn.timestamp && bootstrapTimestamp) {
+      state.bootstrapTurn.timestamp = bootstrapTimestamp;
+    }
+    if (Array.isArray(state.bootstrapTurn.raw_lines) && state.bootstrapTurn.raw_lines.length) {
+      pushBlock(state.bootstrapTurn, {
+        kind: "raw_jsonl",
+        name: "raw_jsonl",
+        text: state.bootstrapTurn.raw_lines.join("\n"),
+        timestamp: state.bootstrapTurn.timestamp ?? null,
+      });
+    }
+  }
+
   return {
     format: "rollout",
     meta: state.meta,
+    bootstrap: state.bootstrapTurn?.blocks?.length ? { blocks: state.bootstrapTurn.blocks } : null,
     turns: state.turns.map((turn, index) => ({
       ...turn,
       index: index + 1,
@@ -959,6 +1095,7 @@ export function parseTranscriptGroup(filePaths) {
 
   return {
     format: "rollout",
+    bootstrap: rootDocument.bootstrap ?? null,
     meta: {
       ...rootDocument.meta,
       grouped: true,

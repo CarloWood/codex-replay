@@ -40,11 +40,14 @@ describe("parseTranscript rollout", () => {
     );
   });
 
-  it("ignores bootstrap response items before the first turn", () => {
+  it("keeps bootstrap response items in a separate bootstrap section", () => {
     const document = parseTranscript(ROLLOUT_FIXTURE);
     const allText = document.turns.flatMap((turn) => turn.blocks.map((block) => block.text)).filter(Boolean);
     assert.equal(document.turns[0].user_text, "Summarize the repo and ask for confirmation.");
     assert.ok(!allText.includes("Bootstrap should be ignored."));
+    assert.ok(document.bootstrap);
+    const bootstrapText = document.bootstrap.blocks.map((block) => block.text).filter(Boolean).join("\n");
+    assert.ok(bootstrapText.includes("Bootstrap should be ignored."));
   });
 
   it("pairs tool calls and extracts request_user_input answers", () => {

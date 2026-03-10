@@ -37,6 +37,7 @@ function serializeBlock(block, { redact }) {
     summary_text: redact ? redactSecrets(block.summary_text) : block.summary_text,
     phase: block.phase ?? null,
     name: block.name ?? null,
+    role: block.role ?? null,
     call_id: block.call_id ?? null,
     timestamp: block.timestamp ?? null,
     response_timestamp: block.response_timestamp ?? null,
@@ -70,6 +71,11 @@ function serializeDocument(document, { redact = true } = {}) {
   return {
     format: document.format,
     meta: redact ? redactObject(document.meta) : document.meta,
+    bootstrap: document.bootstrap
+      ? {
+          blocks: document.bootstrap.blocks.map((block) => serializeBlock(block, { redact })),
+        }
+      : null,
     turns: document.turns.map((turn) => serializeTurn(turn, { redact })),
     sessions: Array.isArray(document.sessions)
       ? document.sessions.map((session) => ({
@@ -105,6 +111,8 @@ export function render(document, opts = {}) {
     showReasoning = true,
     showTools = true,
     showSystem = true,
+    showContext = false,
+    showRaw = false,
     theme = getTheme("cinder-amber"),
     title = document.format === "history" ? "Codex History Replay" : "Codex Replay",
     userLabel = "User",
@@ -132,6 +140,8 @@ export function render(document, opts = {}) {
   html = html.replaceAll("/*CHECKED_REASONING*/", showReasoning ? "checked" : "");
   html = html.replaceAll("/*CHECKED_TOOLS*/", showTools ? "checked" : "");
   html = html.replaceAll("/*CHECKED_SYSTEM*/", showSystem ? "checked" : "");
+  html = html.replaceAll("/*CHECKED_CONTEXT*/", showContext ? "checked" : "");
+  html = html.replaceAll("/*CHECKED_RAW*/", showRaw ? "checked" : "");
   html = html.replaceAll("/*PAGE_TITLE*/", escapeHtml(title));
   html = html.replace("/*USER_LABEL*/", escapeHtml(userLabel));
   html = html.replace("/*ASSISTANT_LABEL*/", escapeHtml(assistantLabel));

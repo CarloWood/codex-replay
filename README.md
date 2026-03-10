@@ -11,6 +11,8 @@ It supports two Codex-native inputs:
 
 Rollout files render as an interactive turn-by-turn player with reasoning, tool, and system filters. History files render as a grouped session timeline.
 
+The replay UI also includes optional `Context` (system/developer/user + metadata) and `Raw` (verbatim JSONL) toggles for debugging transcripts.
+
 ![codex-replay demo](./docs/screenshot-demo.png)
 
 Generated demo replay screenshot. Regenerate it with `npm run docs:demo`.
@@ -92,6 +94,8 @@ codex-replay rollout.jsonl --theme oxide-blue --mark "1:Kickoff" --mark "2:Fix" 
 | `--no-reasoning` | Hide reasoning blocks by default |
 | `--no-tools` | Hide tool blocks by default |
 | `--no-system` | Hide system notice blocks by default |
+| `--context` | Show context blocks (system/developer/user + metadata) by default |
+| `--raw` | Show raw JSONL blocks by default |
 | `--theme NAME` | Built-in theme name |
 | `--theme-file FILE` | Load a custom theme JSON file |
 | `--mark "N:Label"` | Add a bookmark to turn `N` |

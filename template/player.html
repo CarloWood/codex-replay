@@ -357,6 +357,39 @@ body[data-topbar-state="compact"] .history-select {
   margin-bottom: 16px;
 }
 
+.bootstrap {
+  margin-bottom: 16px;
+}
+
+.bootstrap-shell {
+  position: relative;
+  overflow: hidden;
+  border-radius: 26px;
+  background: color-mix(in srgb, var(--bg-surface) 92%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.16);
+}
+
+.bootstrap-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 18px 20px 14px;
+}
+
+.bootstrap-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-bright);
+}
+
+.bootstrap-body {
+  padding: 0 20px 20px;
+}
+
 .turn-shell {
   position: relative;
   overflow: hidden;
@@ -1496,6 +1529,8 @@ details.block-card summary {
         <label class="toggle"><input type="checkbox" id="toggle-reasoning" /*CHECKED_REASONING*/> Reasoning</label>
         <label class="toggle"><input type="checkbox" id="toggle-tools" /*CHECKED_TOOLS*/> Tools</label>
         <label class="toggle"><input type="checkbox" id="toggle-system" /*CHECKED_SYSTEM*/> System</label>
+        <label class="toggle"><input type="checkbox" id="toggle-context" /*CHECKED_CONTEXT*/> Context</label>
+        <label class="toggle"><input type="checkbox" id="toggle-raw" /*CHECKED_RAW*/> Raw</label>
       </div>
     </div>
 
@@ -1560,6 +1595,8 @@ const TOPBAR_SETTLE_MS = 260;
   var toggleReasoning = document.getElementById("toggle-reasoning");
   var toggleTools = document.getElementById("toggle-tools");
   var toggleSystem = document.getElementById("toggle-system");
+  var toggleContext = document.getElementById("toggle-context");
+  var toggleRaw = document.getElementById("toggle-raw");
 
   var bookmarkMap = new Map();
   for (var i = 0; i < BOOKMARKS.length; i += 1) {
@@ -1732,6 +1769,28 @@ const TOPBAR_SETTLE_MS = 260;
     ].join("");
   }
 
+  function renderCollapsiblePre(text, options) {
+    var settings = options || {};
+    var className = settings.className || "json-pre";
+    var linesLimit = settings.linesLimit || 10;
+    var charsLimit = settings.charsLimit || 1200;
+    var collapsedLabel = escapeHtml(settings.collapsedLabel || "Show more");
+    var expandedLabel = escapeHtml(settings.expandedLabel || "Show less");
+    var safeText = text == null ? "" : String(text);
+
+    if (!shouldCollapseContent(safeText, linesLimit, charsLimit)) {
+      return '<pre class="' + className + '">' + escapeHtml(safeText) + "</pre>";
+    }
+
+    return [
+      '<div class="content-collapse is-collapsed" data-kind="' + escapeHtml(settings.kind || "pre") + '">',
+      '  <pre class="content-collapse-body ' + className + '">' + escapeHtml(safeText) + "</pre>",
+      '  <div class="content-collapse-fade"></div>',
+      '  <button type="button" class="collapse-toggle" data-collapsed-label="' + collapsedLabel + '" data-expanded-label="' + expandedLabel + '">' + collapsedLabel + "</button>",
+      "</div>",
+    ].join("");
+  }
+
   function prettyJson(value) {
     if (value == null) return "";
     if (typeof value === "string") return value;
@@ -1891,6 +1950,8 @@ const TOPBAR_SETTLE_MS = 260;
       return toggleTools.checked;
     }
     if (block.kind === "system_notice") return toggleSystem.checked;
+    if (block.kind === "context_message" || block.kind === "context_meta") return toggleContext.checked;
+    if (block.kind === "raw_jsonl") return toggleRaw.checked;
     return true;
   }
 
@@ -1930,6 +1991,14 @@ const TOPBAR_SETTLE_MS = 260;
     if (block.kind === "tool_call") return block.name ? "Tool · " + block.name : "Tool";
     if (block.kind === "custom_tool") return block.name ? "Custom tool · " + block.name : "Custom tool";
     if (block.kind === "system_notice") return "System";
+    if (block.kind === "context_meta") return block.name ? "Context meta · " + block.name : "Context meta";
+    if (block.kind === "context_message") {
+      var role = block.role ? String(block.role) : "context";
+      var label = role ? role.charAt(0).toUpperCase() + role.slice(1) : "Context";
+      if (block.name && block.name !== "message") return label + " · " + block.name;
+      return label;
+    }
+    if (block.kind === "raw_jsonl") return "Raw JSONL";
     return block.name || block.kind;
   }
 
@@ -1944,6 +2013,12 @@ const TOPBAR_SETTLE_MS = 260;
       return truncateText(block.text || "", 132);
     }
     if (block.kind === "system_notice") {
+      return truncateText(block.text || "", 132);
+    }
+    if (block.kind === "context_message") {
+      return truncateText(block.text || "", 132);
+    }
+    if (block.kind === "raw_jsonl") {
       return truncateText(block.text || "", 132);
     }
     if (block.kind === "request_user_input") {
@@ -2044,6 +2119,8 @@ const TOPBAR_SETTLE_MS = 260;
     if (block.kind === "tool_call" || block.kind === "custom_tool" || block.kind === "web_search" || block.kind === "request_user_input") {
       kindClass = "tool";
     }
+    if (block.kind === "context_message" || block.kind === "context_meta") kindClass = "context";
+    if (block.kind === "raw_jsonl") kindClass = "raw";
 
     if (block.kind === "assistant_message") {
       return [
@@ -2096,6 +2173,81 @@ const TOPBAR_SETTLE_MS = 260;
       ].join("");
     }
 
+    if (block.kind === "context_message") {
+      var contextTitle = formatBlockTitle(block);
+      var contextPreview = buildBlockPreview(block);
+      var contextMeta = [];
+      if (block.role) {
+        contextMeta.push(buildMetaChip(block.role, "timestamp"));
+      }
+      if (block.timestamp) {
+        contextMeta.push(buildMetaChip(formatTimestamp(block.timestamp), "timestamp"));
+      }
+      return [
+        '<details class="block-card block-wrapper block-collapsible" data-kind="context_message">',
+        '  <summary class="block-summary">',
+        '    <div class="summary-row">',
+        '      <div class="summary-main">',
+        '        <span class="summary-chevron" aria-hidden="true">&#9654;</span>',
+        '        <div class="summary-copy">',
+        '          <div class="summary-heading">',
+        '            <span class="role-label">Context</span>',
+        '            <span class="summary-title"><span>' + escapeHtml(contextTitle) + "</span></span>",
+        "          </div>",
+        contextPreview ? '          <div class="summary-preview">' + escapeHtml(contextPreview) + "</div>" : "",
+        "        </div>",
+        "      </div>",
+        '      <div class="summary-meta">' + contextMeta.join("") + "</div>",
+        "    </div>",
+        "  </summary>",
+        '  <div class="block-body">' + renderCollapsibleMarkdown(block.text || "", {
+          className: "markdown",
+          kind: "context",
+          linesLimit: 10,
+          charsLimit: 1200,
+        }) + "</div>",
+        "</details>",
+      ].join("");
+    }
+
+    if (block.kind === "raw_jsonl") {
+      var rawTitle = formatBlockTitle(block);
+      var rawPreview = buildBlockPreview(block);
+      var rawMeta = [];
+      var lineCount = countTextLines(block.text || "");
+      rawMeta.push('<span class="summary-hint">' + escapeHtml(pluralizeMetric(lineCount, "line")) + "</span>");
+      if (block.timestamp) {
+        rawMeta.push(buildMetaChip(formatTimestamp(block.timestamp), "timestamp"));
+      }
+      return [
+        '<details class="block-card block-wrapper block-collapsible" data-kind="raw_jsonl">',
+        '  <summary class="block-summary">',
+        '    <div class="summary-row">',
+        '      <div class="summary-main">',
+        '        <span class="summary-chevron" aria-hidden="true">&#9654;</span>',
+        '        <div class="summary-copy">',
+        '          <div class="summary-heading">',
+        '            <span class="role-label">Raw</span>',
+        '            <span class="summary-title"><span>' + escapeHtml(rawTitle) + "</span></span>",
+        "          </div>",
+        rawPreview ? '          <div class="summary-preview">' + escapeHtml(rawPreview) + "</div>" : "",
+        "        </div>",
+        "      </div>",
+        '      <div class="summary-meta">' + rawMeta.join("") + "</div>",
+        "    </div>",
+        "  </summary>",
+        '  <div class="block-body">' + renderCollapsiblePre(block.text || "", {
+          className: "json-pre",
+          kind: "raw",
+          linesLimit: 24,
+          charsLimit: 6000,
+          collapsedLabel: "Show raw",
+          expandedLabel: "Hide raw",
+        }) + "</div>",
+        "</details>",
+      ].join("");
+    }
+
     var title = formatBlockTitle(block);
     var blockPreview = buildBlockPreview(block);
     var hint = "";
@@ -2104,9 +2256,11 @@ const TOPBAR_SETTLE_MS = 260;
       hint = questions + " question" + (questions === 1 ? "" : "s");
     } else if (block.kind === "web_search") {
       hint = block.status || "web search";
+    } else if (block.kind === "context_meta") {
+      hint = "metadata";
     } else if (block.output != null) {
       hint = "request + response";
-    } else if (block.input != null) {
+    } else if (block.input != null && (block.kind === "tool_call" || block.kind === "custom_tool")) {
       hint = "request only";
     }
 
@@ -2455,7 +2609,21 @@ const TOPBAR_SETTLE_MS = 260;
       if (kind === "reasoning") visible = toggleReasoning.checked;
       if (kind === "tool_call" || kind === "custom_tool" || kind === "web_search" || kind === "request_user_input") visible = toggleTools.checked;
       if (kind === "system_notice") visible = toggleSystem.checked;
+      if (kind === "context_message" || kind === "context_meta") visible = toggleContext.checked;
+      if (kind === "raw_jsonl") visible = toggleRaw.checked;
       wrapper.classList.toggle("hidden-by-filter", !visible);
+    }
+    var bootstrapSection = document.getElementById("bootstrap-section");
+    if (bootstrapSection) {
+      var bootstrapVisible = false;
+      var bootstrapBlocks = bootstrapSection.querySelectorAll(".block-wrapper");
+      for (var j = 0; j < bootstrapBlocks.length; j += 1) {
+        if (!bootstrapBlocks[j].classList.contains("hidden-by-filter")) {
+          bootstrapVisible = true;
+          break;
+        }
+      }
+      bootstrapSection.classList.toggle("hidden", !bootstrapVisible);
     }
     if (REPLAY.format === "rollout") syncProgressText();
   }
@@ -2515,13 +2683,43 @@ const TOPBAR_SETTLE_MS = 260;
     transcript.innerHTML = cards.length ? cards.join("") : '<div class="empty-state">No history entries matched this filter.</div>';
   }
 
+  function renderBootstrapSection() {
+    if (REPLAY.format !== "rollout") return "";
+    var bootstrap = REPLAY.bootstrap;
+    if (!bootstrap || !Array.isArray(bootstrap.blocks) || !bootstrap.blocks.length) return "";
+
+    var turn = {
+      index: 0,
+      attachments: { images: [], local_images: [] },
+      user_text: "",
+      timestamp: (REPLAY.meta && REPLAY.meta.started_at) ? REPLAY.meta.started_at : null,
+    };
+    var blocksHtml = bootstrap.blocks.map(function(block) {
+      return renderTurnBlock(block, turn);
+    }).join("");
+
+    return [
+      '<section class="bootstrap" id="bootstrap-section">',
+      '  <div class="bootstrap-shell">',
+      '    <div class="bootstrap-head">',
+      '      <span class="bootstrap-title">Session</span>',
+      turn.timestamp ? '      <time class="turn-time">' + escapeHtml(formatTimestamp(turn.timestamp)) + "</time>" : "",
+      "    </div>",
+      '    <div class="bootstrap-body">',
+      '      <div class="blocks">' + blocksHtml + "</div>",
+      "    </div>",
+      "  </div>",
+      "</section>",
+    ].join("");
+  }
+
   function renderRollout() {
     var turns = REPLAY.turns || [];
     if (!turns.length) {
       transcript.innerHTML = '<div class="empty-state">No replay turns found.</div>';
       return;
     }
-    transcript.innerHTML = turns.map(renderTurn).join("");
+    transcript.innerHTML = renderBootstrapSection() + turns.map(renderTurn).join("");
     progressRange.min = "1";
     progressRange.max = String(turns.length);
     progressRange.value = String(state.currentTurn);
@@ -2564,6 +2762,8 @@ const TOPBAR_SETTLE_MS = 260;
   toggleReasoning.addEventListener("change", syncFilters);
   toggleTools.addEventListener("change", syncFilters);
   toggleSystem.addEventListener("change", syncFilters);
+  toggleContext.addEventListener("change", syncFilters);
+  toggleRaw.addEventListener("change", syncFilters);
   sessionFilter.addEventListener("change", function(event) {
     state.sessionFilter = event.target.value;
     renderHistory();
